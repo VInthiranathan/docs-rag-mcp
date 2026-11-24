@@ -50,6 +50,61 @@ public class DocumentReaderTests
     }
 
     [Fact]
+    public void Front_matter_title_labels_only_the_intro()
+    {
+        var parts = DocumentReader.SplitMarkdown("---\ntitle: Travel policy\ntags: [hr, travel]\n---\nIntro.\n---\nMore intro.\n# Expenses\nKeep receipts.");
+
+        Assert.Collection(parts,
+            part => Assert.Equal(new DocumentPart("Intro.\n---\nMore intro.", "Travel policy"), part),
+            part => Assert.Equal(new DocumentPart("# Expenses\nKeep receipts.", "Expenses"), part));
+    }
+
+    [Theory]
+    [InlineData("---\ntags: [hr]\n---\nIntro.", null)]
+    [InlineData("---\ntags:\n  - hr\n  - travel\n---\nIntro.", null)]
+    [InlineData("---\ntags:\n- hr\n- travel\n---\nIntro.", null)]
+    [InlineData("---\r\ntitle: Travel policy\r\n---\r\nIntro.", "Travel policy")]
+    [InlineData("---\ntitle: \"Travel policy\"\n---\nIntro.", "Travel policy")]
+    [InlineData("---\ntitle: 'Travel policy'\n---\nIntro.", "Travel policy")]
+    [InlineData("---\ntitle:\n---\nIntro.", null)]
+    public void Simple_front_matter_is_skipped(string markdown, string? title)
+    {
+        var part = Assert.Single(DocumentReader.SplitMarkdown(markdown));
+        Assert.Equal(new DocumentPart("Intro.", title), part);
+    }
+
+    [Theory]
+    [InlineData("---\nImportant information.\n---\nKeep receipts.")]
+    [InlineData("---\ntitle: Example\nImportant information.\n---\nKeep receipts.")]
+    [InlineData("---\ntitle: Example\nBody")]
+    [InlineData("---\n---\nBody")]
+    [InlineData("Before\n---\ntitle: Example\n---\nAfter")]
+    [InlineData("```yaml\n---\ntitle: Example\n---\n```")]
+    [InlineData("---\ntags: example\n- ordinary text\n---\nBody")]
+    [InlineData("---\n- ordinary text\n---\nBody")]
+    [InlineData("---\nauthor:\n  name: Example\n---\nBody")]
+    [InlineData("---\nhttps://example.com\n---\nBody")]
+    [InlineData("\n---\ntitle: Example\n---\nBody")]
+    public void Ambiguous_or_unsupported_blocks_are_preserved(string markdown)
+    {
+        var part = Assert.Single(DocumentReader.SplitMarkdown(markdown));
+        Assert.Equal(new DocumentPart(markdown.Trim(), null), part);
+    }
+
+    [Fact]
+    public void Front_matter_without_body_produces_no_parts()
+    {
+        Assert.Empty(DocumentReader.SplitMarkdown("---\ntitle: Example\n---"));
+    }
+
+    [Fact]
+    public void First_heading_overrides_front_matter_title()
+    {
+        var part = Assert.Single(DocumentReader.SplitMarkdown("---\ntitle: Guide\n---\n# Setup\nInstall."));
+        Assert.Equal(new DocumentPart("# Setup\nInstall.", "Setup"), part);
+    }
+
+    [Fact]
     public void Pdf_is_read_page_by_page()
     {
         using var folder = new TempFolder();
