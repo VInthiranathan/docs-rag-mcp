@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.RegularExpressions;
 using UglyToad.PdfPig;
 using UglyToad.PdfPig.DocumentLayoutAnalysis.TextExtractor;
 
@@ -45,10 +46,11 @@ public static class DocumentReader
     {
         var parts = new List<DocumentPart>();
         var current = new StringBuilder();
-        string? heading = null;
+        var lines = markdown.ReplaceLineEndings("\n").Split('\n');
+        var contentStart = GetContentStart(lines, out var heading);
         var inCodeBlock = false;
 
-        foreach (var line in markdown.ReplaceLineEndings("\n").Split('\n'))
+        foreach (var line in lines.Skip(contentStart))
         {
             var trimmed = line.TrimStart();
 
@@ -80,6 +82,53 @@ public static class DocumentReader
                 parts.Add(new DocumentPart(text, heading));
             }
         }
+    }
+
+    // Only recognize a complete block of simple YAML fields and their lists.
+    // Leave unsupported or ambiguous blocks in the document rather than losing text.
+    private static int GetContentStart(string[] lines, out string? title)
+    {
+        title = null;
+        var end = lines[0] == "---" ? Array.IndexOf(lines, "---", 1) : -1;
+        if (end < 0)
+        {
+            return 0;
+        }
+
+        var fields = lines[1..end].Where(line => !string.IsNullOrWhiteSpace(line)).ToArray();
+        if (fields.Length == 0 || !IsSimpleMetadata(fields))
+        {
+            return 0;
+        }
+
+        const string titlePrefix = "title:";
+        var titleLine = fields.FirstOrDefault(line => line.StartsWith(titlePrefix, StringComparison.Ordinal));
+        var value = titleLine?[titlePrefix.Length..].Trim();
+        if (value is { Length: >= 2 } && (value[0] is '\'' or '"') && value[0] == value[^1])
+        {
+            value = value[1..^1];
+        }
+
+        title = string.IsNullOrWhiteSpace(value) ? null : value;
+        return end + 1;
+    }
+
+    private static bool IsSimpleMetadata(string[] fields)
+    {
+        var allowsList = false;
+        foreach (var line in fields)
+        {
+            if (Regex.IsMatch(line, @"^[A-Za-z_][A-Za-z0-9_.-]*:(?:[ \t]+.*)?$"))
+            {
+                allowsList = line[(line.IndexOf(':') + 1)..].Trim().Length == 0;
+            }
+            else if (!allowsList || !line.TrimStart().StartsWith("- ", StringComparison.Ordinal))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static bool TryParseHeading(string line, out string title)
